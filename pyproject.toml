@@ -1,0 +1,22 @@
+[project]
+name = "quickvc"
+version = "0.1.0"
+readme = "README.md"
+description = "QuickVC - voice conversion model"
+authors = [{ name = "Maksym Halych", email = "galych0222@gmail.com" }]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "pyright",
+    "go-task-bin"
+]
+
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

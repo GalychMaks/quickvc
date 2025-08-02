@@ -6,7 +6,6 @@ This repository contains the open source code, audio samples and pretrained mode
 
 <img src="assets/arhitecture-diagram-original.png" width="100%">
 
-
 ## ⚙️ Installation
 
 ### 🔧 Set Up the Python Environment
@@ -37,23 +36,26 @@ This repository contains the open source code, audio samples and pretrained mode
   uv pip install -e .[dev]
   ```
 
+## [Pretrained Model](https://drive.google.com/drive/folders/1DF6RgIHHkn2aoyyUMt4_hPitKSc2YR9d?usp=share_link)
 
-
+Put pretrained model into logs/quickvc
 
 ## Inference with pretrained model
+
 ```python
 python convert.py
 ```
+
 You can change convert.txt to select the target and source
 
 ## Preprocess
 
 1. Hubert-Soft
 
-    ```bash
-    cd dataset
-    python encode.py soft dataset/VCTK-16K dataset/VCTK-16K
-    ```
+   ```bash
+   cd dataset
+   python encode.py soft dataset/VCTK-16K dataset/VCTK-16K
+   ```
 
 1. Spectrogram resize data augumentation, please refer to [FreeVC](https://github.com/OlaWod/FreeVC).
 
@@ -74,13 +76,14 @@ parser.add_argument(
     help="JSON file for configuration",
 )
 parser.add_argument("-m", "--model", type=str, default="quickvc", help="Model name")
-```                   
+```
 
 In order to use the sr during training, change [this part](https://github.com/quickvc/QuickVC-VoiceConversion/blob/277118de9c81d1689e16be8a43408eda4223553d/data_utils_new_new.py#L70) to
+
 ```python
-i = random.randint(68,92)
+i = random.randint(68, 92)
 c_filename = filename.replace(".wav", f"_{i}.npy")
-```    
+```
 
 ## 📚 References
 

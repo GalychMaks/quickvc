@@ -1,53 +1,34 @@
-import argparse
 import logging
 import os
 import time
+from pathlib import Path
 
 import librosa
 import torch
+import typer
 from scipy.io.wavfile import write
 
 import quickvc.utils.utils as utils
 from quickvc.modules.models import SynthesizerTrn
 from quickvc.utils.mel_processing import mel_spectrogram_torch
 
-logging.getLogger("numba").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--hpfile",
-        type=str,
-        default="checkpoints/pretrained/config.json",
-        help="path to json config file",
-    )
-    parser.add_argument(
-        "--ptfile",
-        type=str,
-        default="checkpoints/pretrained/G_1200000.pth",
-        help="path to pth file",
-    )
-    parser.add_argument(
-        "--source",
-        type=str,
-        default="data/source.wav",
-        help="path to source audio file",
-    )
-    parser.add_argument(
-        "--target",
-        type=str,
-        default="data/target.wav",
-        help="path to target audio file",
-    )
-    parser.add_argument(
-        "--outdir", type=str, default="output/quickvc", help="path to output dir"
-    )
-    args = parser.parse_args()
+infer_typer = typer.Typer()
 
+
+@infer_typer.command()
+def infer(
+    config: Path = Path("checkpoints/pretrained/config.json"),
+    checkpoint: Path = Path("checkpoints/pretrained/G_1200000.pth"),
+    source: Path = Path("data/source.wav"),
+    target: Path = Path("data/target.wav"),
+    outdir: Path = Path("output/quickvc"),
+) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    os.makedirs(args.outdir, exist_ok=True)
-    hps = utils.get_hparams_from_file(args.hpfile)
+    os.makedirs(outdir, exist_ok=True)
+    hps = utils.get_hparams_from_file(config)
 
     print("Loading model...")
     net_g = SynthesizerTrn(
@@ -60,7 +41,7 @@ if __name__ == "__main__":
 
     print("Number of parameter: %.2fM" % (total / 1e6))
     print("Loading checkpoint...")
-    _ = utils.load_checkpoint(args.ptfile, net_g, None)
+    _ = utils.load_checkpoint(checkpoint, net_g, None)
 
     print("Loading hubert_soft checkpoint")
     hubert_soft = torch.hub.load("bshall/hubert:main", "hubert_soft").to(device)
@@ -70,7 +51,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         # target
-        wav_tgt, _ = librosa.load(args.target, sr=hps.data.sampling_rate)
+        wav_tgt, _ = librosa.load(target, sr=hps.data.sampling_rate)
         wav_tgt, _ = librosa.effects.trim(wav_tgt, top_db=20)
         wav_tgt = torch.from_numpy(wav_tgt).unsqueeze(0).to(device)
         mel_tgt = mel_spectrogram_torch(
@@ -84,7 +65,7 @@ if __name__ == "__main__":
             hps.data.mel_fmax,
         )
         # source
-        wav_src, _ = librosa.load(args.source, sr=hps.data.sampling_rate)
+        wav_src, _ = librosa.load(source, sr=hps.data.sampling_rate)
         wav_src = torch.from_numpy(wav_src).unsqueeze(0).unsqueeze(0).to(device)
         print(wav_src.size())
         # long running
@@ -97,9 +78,18 @@ if __name__ == "__main__":
         audio = audio[0][0].data.cpu().float().numpy()
 
         timestamp = time.strftime("%m-%d_%H-%M", time.localtime())
-        output_path = os.path.join(args.outdir, f"generated_{timestamp}.wav")
+        output_path = os.path.join(outdir, f"generated_{timestamp}.wav")
         write(
             output_path,
             hps.data.sampling_rate,
             audio,
         )
+        print(f"Saved to {output_path}")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    infer_typer()

@@ -3,11 +3,11 @@ from pathlib import Path
 from typing import cast
 
 import torch
-from pydub import AudioSegment, effects
 import typer
+from pydub import AudioSegment, effects
 
 logger = logging.getLogger(__name__)
-app = typer.Typer()
+split_typer = typer.Typer()
 
 
 def remove_silence(input_path: Path) -> AudioSegment:
@@ -40,7 +40,7 @@ def remove_silence(input_path: Path) -> AudioSegment:
     return speech_only
 
 
-@app.command()
+@split_typer.command()
 def split(
     input_file: Path,
     output_dir: Path,
@@ -91,4 +91,4 @@ if __name__ == "__main__":
         level=logging.DEBUG,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    app()
+    split_typer()

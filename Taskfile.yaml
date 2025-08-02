@@ -11,6 +11,11 @@ tasks:
     cmds:
       - task -l
 
+  help:
+    desc: Help for QuickVC cli tool
+    cmds:
+      - python -m quickvc.cli.main --help
+
   download:
     desc: Download audio from YouTube using yt-dlp
     cmds:
@@ -40,6 +45,6 @@ tasks:
     desc: Run inference on QuickVC model
     cmds:
       - >
-        python -m src.quickvc.cli.convert
+        python -m src.quickvc.cli.infer
         --source data/chunks/iRmIysIo5AQ_1.mp3
         --target data/chunks/BQaLK_s6ygg_1.mp3

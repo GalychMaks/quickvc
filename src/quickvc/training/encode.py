@@ -9,8 +9,10 @@ from torchaudio.functional import resample
 
 
 def encode_dataset(args):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     print("Loading hubert checkpoint")
-    hubert = torch.hub.load("bshall/hubert:main", "hubert_soft").cuda().eval()
+    hubert = torch.hub.load("bshall/hubert:main", "hubert_soft").to(device).eval()  # type: ignore
 
     print(f"Encoding dataset at {args.in_dir}")
     for in_path in tqdm(list(args.in_dir.rglob(f"*{args.extension}"))):

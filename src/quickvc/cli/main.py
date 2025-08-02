@@ -2,8 +2,8 @@ import logging
 
 import typer
 
-from .commands.infer import infer_typer
-from .commands.split import split_typer
+from .commands.infer import infer
+from .commands.split import split
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,8 +14,8 @@ logging.basicConfig(
 typer_app = typer.Typer(help="Main CLI entry point")
 
 # Register subcommands
-typer_app.add_typer(split_typer, name="split", help="Split audio into chunks")
-typer_app.add_typer(infer_typer, name="infer", help="Run inference using QuickVC model")
+typer_app.command(name="split", help="Split audio into chunks")(split)
+typer_app.command(name="infer", help="Run inference using QuickVC model")(infer)
 
 
 if __name__ == "__main__":

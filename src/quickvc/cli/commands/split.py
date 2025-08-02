@@ -40,7 +40,6 @@ def remove_silence(input_path: Path) -> AudioSegment:
     return speech_only
 
 
-@split_typer.command()
 def split(
     input_file: Path,
     output_dir: Path,
@@ -84,11 +83,3 @@ def split(
         logger.debug(f"Exported {out_path.name}")
 
     logger.info("All done.")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-    split_typer()

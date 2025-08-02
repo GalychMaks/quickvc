@@ -1,11 +1,13 @@
 import logging
 from pathlib import Path
+from typing import cast
 
-import click
 import torch
 from pydub import AudioSegment, effects
+import typer
 
 logger = logging.getLogger(__name__)
+app = typer.Typer()
 
 
 def remove_silence(input_path: Path) -> AudioSegment:
@@ -14,7 +16,7 @@ def remove_silence(input_path: Path) -> AudioSegment:
     """
 
     # torch.set_num_threads(1)
-    model, utils = torch.hub.load(
+    model, utils = torch.hub.load(  # type: ignore
         "snakers4/silero-vad", "silero_vad", force_reload=False
     )
     get_ts, _, read_audio, _, _ = utils
@@ -38,17 +40,34 @@ def remove_silence(input_path: Path) -> AudioSegment:
     return speech_only
 
 
-def split_chunks(
-    audio: AudioSegment,
+@app.command()
+def split(
+    input_file: Path,
     output_dir: Path,
-    chunk_length: int,
-    normalize: bool,
-    prefix: str,
-    fmt: str,
-):
-    """Split `audio` into exact chunk_length-second pieces, export to output_dir."""
+    chunk_length: int = 20,
+    normalize: bool = False,
+    prefix: str = "chunk",
+    output_format: str = "mp3",
+) -> None:
+    """
+    1) Remove silence via Silero VAD → one long speech-only AudioSegment.
+    2) Split that segment into fixed-length chunks (no silence) and export.
+    """
+
+    if not input_file.exists() or not input_file.is_file():
+        raise typer.BadParameter(f"Input file does not exist: {input_file}")
+
+    # Create output directory if needed
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Do the work
+    speech_audio = remove_silence(input_file)
+    if len(speech_audio) < chunk_length * 1000:
+        logger.warning("Not enough speech to form even one chunk.")
+        raise typer.Exit(code=0)
+
     chunk_ms = chunk_length * 1000
-    total_ms = len(audio)
+    total_ms = len(speech_audio)
     num_chunks = total_ms // chunk_ms
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -57,52 +76,13 @@ def split_chunks(
     for i in range(num_chunks):
         start = i * chunk_ms
         end = start + chunk_ms
-        chunk = audio[start:end]
+        chunk = cast(AudioSegment, speech_audio[start:end])
         if normalize:
             chunk = effects.normalize(chunk)
-        out_path = output_dir / f"{prefix}_{i + 1}.{fmt}"
-        chunk.export(out_path, format=fmt)
+        out_path = output_dir / f"{prefix}_{i + 1}.{output_format}"
+        chunk.export(out_path, format=output_format)
         logger.debug(f"Exported {out_path.name}")
 
-
-@click.command()
-@click.option(
-    "--input-file", "-i", type=click.Path(exists=True, path_type=Path), required=True
-)
-@click.option("--output-dir", "-o", type=click.Path(path_type=Path), required=True)
-@click.option(
-    "--chunk-length",
-    "-l",
-    type=int,
-    default=20,
-    show_default=True,
-    help="Seconds per chunk.",
-)
-@click.option("--normalize", is_flag=True, help="Normalize each chunk.")
-@click.option("--prefix", default="chunk", show_default=True, help="Filename prefix.")
-@click.option(
-    "--output-format",
-    default="mp3",
-    show_default=True,
-    type=click.Choice(["mp3", "wav", "flac", "ogg", "aac"], case_sensitive=False),
-)
-def split(input_file, output_dir, chunk_length, normalize, prefix, output_format):
-    """
-    1) Remove silence via Silero VAD → one long speech-only AudioSegment.
-    2) Split that segment into fixed-length chunks (no silence) and export.
-    """
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
-
-    speech_audio = remove_silence(input_file)
-    if len(speech_audio) < chunk_length * 1000:
-        logger.warning("Not enough speech to form even one chunk.")
-        return
-
-    split_chunks(
-        speech_audio, output_dir, chunk_length, normalize, prefix, output_format
-    )
     logger.info("All done.")
 
 
@@ -111,4 +91,4 @@ if __name__ == "__main__":
         level=logging.DEBUG,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    split()
+    app()

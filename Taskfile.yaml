@@ -2,7 +2,7 @@ version: "3"
 
 env:
   YOUTUBE_ID: iRmIysIo5AQ # BQaLK_s6ygg
-  
+
   DATASET_DIR: data
 
 tasks:
@@ -29,8 +29,8 @@ tasks:
       - mkdir -p "$DATASET_DIR/chunks"
       - >
         python -m src.quickvc.cli.split
-        --input-file "$DATASET_DIR/$YOUTUBE_ID.mp3" 
-        --output-dir "$DATASET_DIR/chunks"
+        "$DATASET_DIR/$YOUTUBE_ID.mp3" 
+        "$DATASET_DIR/chunks"
         --chunk-length 10
         --normalize 
         --prefix "$YOUTUBE_ID"
@@ -42,4 +42,4 @@ tasks:
       - >
         python -m src.quickvc.cli.convert
         --source data/chunks/iRmIysIo5AQ_1.mp3
-        --target data/chunks/BQaLK_s6ygg_1.mp3 
+        --target data/chunks/BQaLK_s6ygg_1.mp3

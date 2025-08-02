@@ -1,7 +1,45 @@
 version: "3"
 
+env:
+  YOUTUBE_ID: iRmIysIo5AQ # BQaLK_s6ygg
+  
+  DATASET_DIR: data
+
 tasks:
   default:
     desc: Show available tasks
     cmds:
       - task -l
+
+  download:
+    desc: Download audio from YouTube using yt-dlp
+    cmds:
+      - mkdir -p "$DATASET_DIR"
+      - >
+        yt-dlp 
+        -f bestaudio 
+        --extract-audio 
+        --audio-format mp3
+        -o "$DATASET_DIR/$YOUTUBE_ID.%(ext)s"
+        "https://www.youtube.com/watch?v=$YOUTUBE_ID"
+
+  split:
+    desc: Split a specific audio file into chunks for dataset preparation
+    cmds:
+      - mkdir -p "$DATASET_DIR/chunks"
+      - >
+        python -m src.quickvc.cli.split
+        --input-file "$DATASET_DIR/$YOUTUBE_ID.mp3" 
+        --output-dir "$DATASET_DIR/chunks"
+        --chunk-length 10
+        --normalize 
+        --prefix "$YOUTUBE_ID"
+        --output-format mp3
+
+  infer:
+    desc: Run inference on QuickVC model
+    cmds:
+      - >
+        python -m src.quickvc.cli.convert
+        --source data/chunks/iRmIysIo5AQ_1.mp3
+        --target data/chunks/BQaLK_s6ygg_1.mp3 

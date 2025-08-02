@@ -10,14 +10,18 @@ dependencies = [
     "torchaudio",
     "torchvision",
     "librosa",
-    "matplotlib"
+    "matplotlib",
+    "tqdm",
+    "click",
+    "pydub"
 ]
 
 [project.optional-dependencies]
 dev = [
     "pre-commit",
     "pyright",
-    "go-task-bin"
+    "go-task-bin",
+    "yt-dlp"
 ]
 
 [build-system]

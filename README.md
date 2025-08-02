@@ -38,17 +38,17 @@ This repository contains the open source code, audio samples and pretrained mode
 
 ## [Pretrained Model](https://drive.google.com/drive/folders/1DF6RgIHHkn2aoyyUMt4_hPitKSc2YR9d?usp=share_link)
 
-Put pretrained model into logs/quickvc
+Put pretrained model into `checkpoints/pretrained`
 
 ## Inference with pretrained model
 
 ```python
-python convert.py
+task infer
 ```
 
-You can change convert.txt to select the target and source
+> See `Taskfile.yaml` for details
 
-## Preprocess
+## Preprocess [WIP]
 
 1. Hubert-Soft
 
@@ -59,7 +59,7 @@ You can change convert.txt to select the target and source
 
 1. Spectrogram resize data augumentation, please refer to [FreeVC](https://github.com/OlaWod/FreeVC).
 
-## Train
+## Train [WIP]
 
 ```bash
 python train.py

@@ -6,10 +6,10 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 
-import commons
-import utils
-from mel_processing import spectrogram_torch
-from utils import load_filepaths_and_text, load_wav_to_torch
+import quickvc.utils.commons as commons
+import quickvc.utils.utils as utils
+from quickvc.utils.mel_processing import spectrogram_torch
+from quickvc.utils.utils import load_filepaths_and_text, load_wav_to_torch
 
 # import h5py
 

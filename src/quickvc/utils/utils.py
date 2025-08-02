@@ -1,14 +1,15 @@
-import os
-import glob
-import sys
 import argparse
-import logging
+import glob
 import json
+import logging
+import os
 import subprocess
+import sys
+
 import numpy as np
-from scipy.io.wavfile import read
 import torch
 import torchvision
+from scipy.io.wavfile import read
 
 MATPLOTLIB_FLAG = False
 

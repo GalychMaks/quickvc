@@ -53,3 +53,6 @@ dist/
 *.spec
 
 # === Project Specific ===
+checkpoints/
+data/
+output/

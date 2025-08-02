@@ -1,17 +1,17 @@
 import math
+
 import torch
 from torch import nn
+from torch.nn import Conv1d, Conv2d, ConvTranspose1d
 from torch.nn import functional as F
+from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
 
-import commons
-import modules
-import attentions
-
-from torch.nn import Conv1d, ConvTranspose1d, Conv2d
-from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
-from commons import init_weights, get_padding
-from pqmf import PQMF
-from stft import TorchSTFT
+import quickvc.modules.attentions as attentions
+import quickvc.modules.modules as modules
+import quickvc.utils.commons as commons
+from quickvc.modules.pqmf import PQMF
+from quickvc.modules.stft import TorchSTFT
+from quickvc.utils.commons import get_padding, init_weights
 
 
 class StochasticDurationPredictor(nn.Module):

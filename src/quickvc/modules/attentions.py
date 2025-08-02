@@ -1,10 +1,11 @@
 import math
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-import commons
-from modules import LayerNorm
+import quickvc.utils.commons as commons
+from quickvc.modules.modules import LayerNorm
 
 
 class Encoder(nn.Module):

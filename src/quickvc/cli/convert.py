@@ -1,15 +1,16 @@
-import os
 import argparse
-import torch
-import librosa
+import logging
+import os
 import time
+
+import librosa
+import torch
 from scipy.io.wavfile import write
 from tqdm import tqdm
 
-import utils
-from models import SynthesizerTrn
-from mel_processing import mel_spectrogram_torch
-import logging
+import quickvc.utils.utils as utils
+from quickvc.modules.models import SynthesizerTrn
+from quickvc.utils.mel_processing import mel_spectrogram_torch
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 

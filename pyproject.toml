@@ -5,7 +5,13 @@ readme = "README.md"
 description = "QuickVC - voice conversion model"
 authors = [{ name = "Maksym Halych", email = "galych0222@gmail.com" }]
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "librosa",
+    "matplotlib"
+]
 
 [project.optional-dependencies]
 dev = [

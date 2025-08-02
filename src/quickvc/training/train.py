@@ -1,34 +1,35 @@
 import os
+
 import torch
-from torch.nn import functional as F
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-import torch.multiprocessing as mp
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.cuda.amp import autocast, GradScaler
-from pqmf import PQMF
-
-import commons
-import utils
-
-from data_utils_new_new import (
-    TextAudioSpeakerLoader,
-    TextAudioSpeakerCollate,
-    DistributedBucketSampler,
-)
-from models import (
-    SynthesizerTrn,
-    MultiPeriodDiscriminator,
-)
+import torch.multiprocessing as mp
 from losses import (
-    generator_loss,
     discriminator_loss,
     feature_loss,
+    generator_loss,
     kl_loss,
     subband_stft_loss,
 )
-from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from torch.cuda.amp import GradScaler, autocast
+from torch.nn import functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+
+import quickvc.utils.commons as commons
+import quickvc.utils.utils as utils
+from quickvc.modules.models import (
+    MultiPeriodDiscriminator,
+    SynthesizerTrn,
+)
+from quickvc.modules.pqmf import PQMF
+from quickvc.training.data_utils_new_new import (
+    DistributedBucketSampler,
+    TextAudioSpeakerCollate,
+    TextAudioSpeakerLoader,
+)
+from quickvc.utils.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+
 # from text.symbols import symbols
 
 torch.autograd.set_detect_anomaly(True)

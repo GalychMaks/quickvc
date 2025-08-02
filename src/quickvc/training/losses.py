@@ -1,5 +1,6 @@
 import torch
-from stft_loss import MultiResolutionSTFTLoss
+
+from quickvc.training.stft_loss import MultiResolutionSTFTLoss
 
 
 def feature_loss(fmap_r, fmap_g):

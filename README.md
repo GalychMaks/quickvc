@@ -43,6 +43,29 @@ Put pretrained model into `checkpoints/pretrained`
 ## Inference with pretrained model
 
 ```python
+from quickvc.wrapper import QuickVC
+
+# Initialize model
+vc = QuickVC(
+    config_path="configs/quickvc.yaml",
+    checkpoint_path="checkpoints/quickvc.pth",
+)
+
+# Run conversion
+converted_audio, sr = vc.convert_voice(
+    source="audio/source.wav",
+    target="audio/target.wav",
+)
+
+# Save output
+import soundfile as sf
+
+sf.write("converted.wav", converted_audio, sr)
+```
+
+### Or run using cli:
+
+```bash
 task infer
 ```
 

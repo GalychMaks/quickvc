@@ -4,7 +4,6 @@ from pathlib import Path
 
 import torch
 from omegaconf import OmegaConf
-from torch.cuda.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -37,13 +36,13 @@ from quickvc.utils.utils import (
 torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.benchmark = True
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 logger = logging.getLogger(__name__)
 
 
 class Trainer:
     def __init__(self, config_path: Path | str):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = OmegaConf.load(config_path)
         self.config.model_dir = "logs/quickvc"
         self.global_step = 0
@@ -86,10 +85,10 @@ class Trainer:
             self.config.data.filter_length // 2 + 1,
             self.config.train.segment_size // self.config.data.hop_length,
             **self.config.model,
-        ).to(device)
+        ).to(self.device)
 
         self.net_d = MultiPeriodDiscriminator(self.config.model.use_spectral_norm).to(
-            device
+            self.device
         )
 
         # Optimizers
@@ -136,9 +135,6 @@ class Trainer:
             last_epoch=self.epoch_str - 2,
         )
 
-        # Scaler ?
-        self.scaler = GradScaler(enabled=self.config.train.fp16_run)
-
     def train(self):
         # Training loop
         for epoch in range(self.epoch_str, self.config.train.epochs + 1):
@@ -159,9 +155,9 @@ class Trainer:
         self.net_d.train()
         for batch_idx, (c, spec, y) in enumerate(self.train_loader):
             g = None
-            spec, y = spec.to(device), y.to(device)
+            spec, y = spec.to(self.device), y.to(self.device)
 
-            c = c.to(device)
+            c = c.to(self.device)
             mel = spec_to_mel_torch(
                 spec,
                 self.config.data.filter_length,
@@ -171,90 +167,82 @@ class Trainer:
                 self.config.data.mel_fmax,
             )
 
-            with autocast(enabled=self.config.train.fp16_run):
-                # print(c.size())
-                (
-                    y_hat,
-                    y_hat_mb,
-                    ids_slice,
-                    z_mask,
-                    (z, z_p, m_p, logs_p, m_q, logs_q),
-                ) = self.net_g(c, spec, g=g, mel=mel)
+            # print(c.size())
+            (
+                y_hat,
+                y_hat_mb,
+                ids_slice,
+                z_mask,
+                (z, z_p, m_p, logs_p, m_q, logs_q),
+            ) = self.net_g(c, spec, g=g, mel=mel)
 
-                mel = spec_to_mel_torch(
-                    spec,
-                    self.config.data.filter_length,
-                    self.config.data.n_mel_channels,
-                    self.config.data.sampling_rate,
-                    self.config.data.mel_fmin,
-                    self.config.data.mel_fmax,
-                )
-                y_mel = slice_segments(
-                    mel,
-                    ids_slice,
-                    self.config.train.segment_size // self.config.data.hop_length,
-                )
-                y_hat_mel = mel_spectrogram_torch(
-                    y_hat.squeeze(1),
-                    self.config.data.filter_length,
-                    self.config.data.n_mel_channels,
-                    self.config.data.sampling_rate,
-                    self.config.data.hop_length,
-                    self.config.data.win_length,
-                    self.config.data.mel_fmin,
-                    self.config.data.mel_fmax,
-                )
-                tmp = max(tmp, y.size()[2])
-                tmp1 = min(tmp1, y.size()[2])
-                y = slice_segments(
-                    y,
-                    ids_slice * self.config.data.hop_length,
-                    self.config.train.segment_size,
-                )  # slice
+            mel = spec_to_mel_torch(
+                spec,
+                self.config.data.filter_length,
+                self.config.data.n_mel_channels,
+                self.config.data.sampling_rate,
+                self.config.data.mel_fmin,
+                self.config.data.mel_fmax,
+            )
+            y_mel = slice_segments(
+                mel,
+                ids_slice,
+                self.config.train.segment_size // self.config.data.hop_length,
+            )
+            y_hat_mel = mel_spectrogram_torch(
+                y_hat.squeeze(1),
+                self.config.data.filter_length,
+                self.config.data.n_mel_channels,
+                self.config.data.sampling_rate,
+                self.config.data.hop_length,
+                self.config.data.win_length,
+                self.config.data.mel_fmin,
+                self.config.data.mel_fmax,
+            )
+            tmp = max(tmp, y.size()[2])
+            tmp1 = min(tmp1, y.size()[2])
+            y = slice_segments(
+                y,
+                ids_slice * self.config.data.hop_length,
+                self.config.train.segment_size,
+            )  # slice
 
-                y_d_hat_r, y_d_hat_g, _, _ = self.net_d(y, y_hat.detach())
-                with autocast(enabled=False):
-                    loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
-                        y_d_hat_r, y_d_hat_g
-                    )
-                    loss_disc_all = loss_disc
+            y_d_hat_r, y_d_hat_g, _, _ = self.net_d(y, y_hat.detach())
+            loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
+                y_d_hat_r, y_d_hat_g
+            )
+            loss_disc_all = loss_disc
+
             self.optim_d.zero_grad()
-            self.scaler.scale(loss_disc_all).backward()
-            self.scaler.unscale_(self.optim_d)
+            loss_disc_all.backward()
             grad_norm_d = clip_grad_value_(self.net_d.parameters(), None)
-            self.scaler.step(self.optim_d)
+            self.optim_d.step()
 
-            with autocast(enabled=self.config.train.fp16_run):
-                # Generator
-                y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = self.net_d(y, y_hat)
-                with autocast(enabled=False):
-                    # loss_dur = torch.sum(l_length.float())
-                    loss_mel = F.l1_loss(y_mel, y_hat_mel) * self.config.train.c_mel
-                    loss_kl = (
-                        kl_loss(z_p, logs_q, m_p, logs_p, z_mask)
-                        * self.config.train.c_kl
-                    )
+            # Generator
+            y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = self.net_d(y, y_hat)
 
-                    loss_fm = feature_loss(fmap_r, fmap_g)
-                    loss_gen, losses_gen = generator_loss(y_d_hat_g)
+            # loss_dur = torch.sum(l_length.float())
+            loss_mel = F.l1_loss(y_mel, y_hat_mel) * self.config.train.c_mel
+            loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * self.config.train.c_kl
 
-                    if self.config.model.mb_istft_vits:
-                        pqmf = PQMF(y.device)
-                        y_mb = pqmf.analysis(y)
-                        loss_subband = subband_stft_loss(self.config, y_mb, y_hat_mb)
-                    else:
-                        loss_subband = torch.tensor(0.0)
+            loss_fm = feature_loss(fmap_r, fmap_g)
+            loss_gen, losses_gen = generator_loss(y_d_hat_g)
 
-                    loss_gen_all = (
-                        loss_gen + loss_fm + loss_mel + loss_kl + loss_subband
-                    )  # + loss_dur
+            if self.config.model.mb_istft_vits:
+                pqmf = PQMF(y.device)
+                y_mb = pqmf.analysis(y)
+                loss_subband = subband_stft_loss(self.config, y_mb, y_hat_mb)
+            else:
+                loss_subband = torch.tensor(0.0)
+
+            loss_gen_all = (
+                loss_gen + loss_fm + loss_mel + loss_kl + loss_subband
+            )  # + loss_dur
 
             self.optim_g.zero_grad()
-            self.scaler.scale(loss_gen_all).backward()
-            self.scaler.unscale_(self.optim_g)
+            loss_gen_all.backward()
             grad_norm_g = clip_grad_value_(self.net_g.parameters(), None)
-            self.scaler.step(self.optim_g)
-            self.scaler.update()
+            self.optim_g.step()
 
             if True:
                 if self.global_step % self.config.train.log_interval == 0:
@@ -342,8 +330,8 @@ class Trainer:
         with torch.no_grad():
             for batch_idx, (c, spec, y) in enumerate(self.eval_loader):
                 g = None
-                spec, y = spec[:1].to(device), y[:1].to(device)
-                c = c[:1].to(device)
+                spec, y = spec[:1].to(self.device), y[:1].to(self.device)
+                c = c[:1].to(self.device)
 
                 break
             mel = spec_to_mel_torch(

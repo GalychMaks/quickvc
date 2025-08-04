@@ -1,95 +1,57 @@
 import logging
-import os
 import time
 from pathlib import Path
+from typing import Optional
 
-import librosa
+import soundfile as sf
 import torch
-import typer
-from scipy.io.wavfile import write
 
-import quickvc.utils.utils as utils
-from quickvc.modules.models import SynthesizerTrn
-from quickvc.utils.mel_processing import mel_spectrogram_torch
+from quickvc.utils.timer import Timer
+from quickvc.wrapper import QuickVC
 
 logger = logging.getLogger(__name__)
 
-infer_typer = typer.Typer()
 
-
-@infer_typer.command()
 def infer(
-    config: Path = Path("checkpoints/pretrained/config.json"),
-    checkpoint: Path = Path("checkpoints/pretrained/G_1200000.pth"),
+    config_path: Path = Path("checkpoints/pretrained/config.yaml"),
+    checkpoint_path: Path = Path("checkpoints/pretrained/G_1200000.pth"),
     source: Path = Path("data/source.wav"),
     target: Path = Path("data/target.wav"),
-    outdir: Path = Path("output/quickvc"),
+    output_dir: Path = Path("output/quickvc"),
+    output_name: Optional[str] = None,
 ) -> None:
+    # Initialize
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    os.makedirs(outdir, exist_ok=True)
-    hps = utils.get_hparams_from_file(config)
-
-    print("Loading model...")
-    net_g = SynthesizerTrn(
-        hps.data.filter_length // 2 + 1,
-        hps.train.segment_size // hps.data.hop_length,
-        **hps.model,
-    ).to(device)
-    _ = net_g.eval()
-    total = sum([param.nelement() for param in net_g.parameters()])
-
-    print("Number of parameter: %.2fM" % (total / 1e6))
-    print("Loading checkpoint...")
-    _ = utils.load_checkpoint(checkpoint, net_g, None)
-
-    print("Loading hubert_soft checkpoint")
-    hubert_soft = torch.hub.load("bshall/hubert:main", "hubert_soft").to(device)
-    print("Loaded soft hubert.")
-
-    print("Synthesizing...")
-
-    with torch.no_grad():
-        # target
-        wav_tgt, _ = librosa.load(target, sr=hps.data.sampling_rate)
-        wav_tgt, _ = librosa.effects.trim(wav_tgt, top_db=20)
-        wav_tgt = torch.from_numpy(wav_tgt).unsqueeze(0).to(device)
-        mel_tgt = mel_spectrogram_torch(
-            wav_tgt,
-            hps.data.filter_length,
-            hps.data.n_mel_channels,
-            hps.data.sampling_rate,
-            hps.data.hop_length,
-            hps.data.win_length,
-            hps.data.mel_fmin,
-            hps.data.mel_fmax,
-        )
-        # source
-        wav_src, _ = librosa.load(source, sr=hps.data.sampling_rate)
-        wav_src = torch.from_numpy(wav_src).unsqueeze(0).unsqueeze(0).to(device)
-        print(wav_src.size())
-        # long running
-        # do something other
-        c = hubert_soft.units(wav_src)
-
-        c = c.transpose(2, 1)
-        # print(c.size())
-        audio = net_g.infer(c, mel=mel_tgt)
-        audio = audio[0][0].data.cpu().float().numpy()
-
-        timestamp = time.strftime("%m-%d_%H-%M", time.localtime())
-        output_path = os.path.join(outdir, f"generated_{timestamp}.wav")
-        write(
-            output_path,
-            hps.data.sampling_rate,
-            audio,
-        )
-        print(f"Saved to {output_path}")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    logger.info("Initializing QuickVC")
+    quickvc = QuickVC(
+        config_path=config_path,
+        checkpoint_path=checkpoint_path,
+        device=device,
     )
-    infer_typer()
+
+    # Run inferece
+    logger.info("Synthesizing...")
+    with Timer() as t:
+        generated_np, sr = quickvc.convert_voice(source, target)
+
+    # Compute RTF
+    audio_duration = len(generated_np) / sr
+    rtf = t.elapsed / audio_duration
+
+    logger.info(
+        f"Elapsed time: {t.elapsed:.4f}s, Audio duration: {audio_duration:.2f}s, RTF: {rtf:.4f} iRTF: {1 / rtf:.2f}"
+    )
+
+    # Save generated audio
+    logger.info("Saving generated audio...")
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    if output_name:
+        output_path = Path(output_dir) / output_name
+    else:
+        timestamp = time.strftime("%m-%d_%H-%M", time.localtime())
+        output_path = Path(output_dir) / f"generated_{timestamp}.wav"
+
+    sf.write(output_path, generated_np, sr, format="wav")
+    logger.info(f"Saved to '{output_path}'")

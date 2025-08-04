@@ -3,11 +3,9 @@ from pathlib import Path
 from typing import cast
 
 import torch
-import typer
 from pydub import AudioSegment, effects
 
 logger = logging.getLogger(__name__)
-split_typer = typer.Typer()
 
 
 def remove_silence(input_path: Path) -> AudioSegment:
@@ -40,7 +38,6 @@ def remove_silence(input_path: Path) -> AudioSegment:
     return speech_only
 
 
-@split_typer.command()
 def split(
     input_file: Path,
     output_dir: Path,
@@ -55,7 +52,7 @@ def split(
     """
 
     if not input_file.exists() or not input_file.is_file():
-        raise typer.BadParameter(f"Input file does not exist: {input_file}")
+        raise FileNotFoundError(f"Input file does not exist: {input_file}")
 
     # Create output directory if needed
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,8 +60,7 @@ def split(
     # Do the work
     speech_audio = remove_silence(input_file)
     if len(speech_audio) < chunk_length * 1000:
-        logger.warning("Not enough speech to form even one chunk.")
-        raise typer.Exit(code=0)
+        raise RuntimeError("Not enough speech to form even one chunk.")
 
     chunk_ms = chunk_length * 1000
     total_ms = len(speech_audio)
@@ -84,11 +80,3 @@ def split(
         logger.debug(f"Exported {out_path.name}")
 
     logger.info("All done.")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-    split_typer()

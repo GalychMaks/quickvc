@@ -13,7 +13,8 @@ dependencies = [
     "matplotlib",
     "tqdm",
     "pydub",
-    "typer"
+    "typer",
+    "omegaconf"
 ]
 
 [project.optional-dependencies]

@@ -33,7 +33,7 @@ tasks:
     cmds:
       - mkdir -p "$DATASET_DIR/chunks"
       - >
-        python -m src.quickvc.cli.split
+        python -m src.quickvc.cli.main split
         "$DATASET_DIR/$YOUTUBE_ID.mp3" 
         "$DATASET_DIR/chunks"
         --chunk-length 10
@@ -45,6 +45,6 @@ tasks:
     desc: Run inference on QuickVC model
     cmds:
       - >
-        python -m src.quickvc.cli.infer
+        python -m src.quickvc.cli.main infer
         --source data/chunks/iRmIysIo5AQ_1.mp3
         --target data/chunks/BQaLK_s6ygg_1.mp3

@@ -3,9 +3,11 @@ import glob
 import json
 import logging
 import os
+from pathlib import Path
 import subprocess
-import sys
+from typing import Optional
 
+import librosa
 import numpy as np
 import torch
 import torchvision
@@ -13,8 +15,7 @@ from scipy.io.wavfile import read
 
 MATPLOTLIB_FLAG = False
 
-logging.basicConfig(stream=sys.stdout, level=logging.WARNING)
-logger = logging
+logger = logging.getLogger(__name__)
 
 
 def load_checkpoint(checkpoint_path, model, optimizer=None):
@@ -299,3 +300,25 @@ class HParams:
 
     def __repr__(self):
         return self.__dict__.__repr__()
+
+
+def load_audio_array(
+    audio: tuple[np.ndarray, int] | Path | str,
+    sr: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Load audio into a float32 numpy array @ the sample rate.
+
+    * If audio is a tuple (wave, sr), the data are resampled when
+      their sampling rate differs from self.sr.
+    * If audio is a path‑like, the file is loaded with librosa.
+    """
+
+    if isinstance(audio, tuple):
+        audio_array, sr_input = audio
+        if sr is not None and sr_input != sr:
+            audio_array = librosa.resample(audio_array, orig_sr=sr_input, target_sr=sr)
+    else:
+        audio_array, _ = librosa.load(audio, sr=sr)
+
+    return audio_array

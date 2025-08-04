@@ -56,3 +56,9 @@ tasks:
       - >
         python -m quickvc.cli.main encode
         --dataset-dir ${DATASET_DIR}
+
+  train:
+    desc: Start QuickVC traning
+    cmds:
+      - >
+        python -m quickvc.training.train

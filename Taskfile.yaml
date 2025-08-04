@@ -25,6 +25,7 @@ tasks:
         -f bestaudio 
         --extract-audio 
         --audio-format mp3
+        --postprocessor-args "-ar 16000 -ac 1" 
         -o "$DATASET_DIR/$YOUTUBE_ID.%(ext)s"
         "https://www.youtube.com/watch?v=$YOUTUBE_ID"
 
@@ -39,7 +40,7 @@ tasks:
         --chunk-length 10
         --normalize 
         --prefix "$YOUTUBE_ID"
-        --output-format mp3
+        --output-format wav
 
   infer:
     desc: Run inference on QuickVC model
@@ -48,3 +49,10 @@ tasks:
         python -m src.quickvc.cli.main infer
         --source data/chunks/iRmIysIo5AQ_1.mp3
         --target data/chunks/BQaLK_s6ygg_1.mp3
+
+  encode:
+    desc: Extract and save hubert units for dataset
+    cmds:
+      - >
+        python -m quickvc.cli.main encode
+        --dataset-dir ${DATASET_DIR}

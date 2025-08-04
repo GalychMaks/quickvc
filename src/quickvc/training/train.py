@@ -7,8 +7,6 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-import quickvc.utils.commons as commons
-import quickvc.utils.utils as utils
 from quickvc.modules.models import (
     MultiPeriodDiscriminator,
     SynthesizerTrn,
@@ -25,7 +23,17 @@ from quickvc.training.losses import (
     kl_loss,
     subband_stft_loss,
 )
+from quickvc.utils.commons import clip_grad_value_, slice_segments
 from quickvc.utils.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from quickvc.utils.utils import (
+    check_git_hash,
+    get_hparams,
+    get_logger,
+    latest_checkpoint_path,
+    load_checkpoint,
+    save_checkpoint,
+    summarize,
+)
 
 torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.benchmark = True
@@ -35,12 +43,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Trainer:
     def __init__(self):
-        self.hps = utils.get_hparams()
+        self.hps = get_hparams()
         self.global_step = 0
-        self.logger = utils.get_logger(self.hps.model_dir)
+        self.logger = get_logger(self.hps.model_dir)
         self.logger.info(self.hps)
 
-        utils.check_git_hash(self.hps.model_dir)
+        check_git_hash(self.hps.model_dir)
         self.writer = SummaryWriter(log_dir=self.hps.model_dir)
         self.writer_eval = SummaryWriter(
             log_dir=os.path.join(self.hps.model_dir, "eval")
@@ -96,28 +104,28 @@ class Trainer:
 
         # Load checkpoints
         try:
-            _, _, _, self.epoch_str = utils.load_checkpoint(
-                utils.latest_checkpoint_path(self.hps.model_dir, "G_*.pth"),
+            _, _, _, self.epoch_str = load_checkpoint(
+                latest_checkpoint_path(self.hps.model_dir, "G_*.pth"),
                 self.net_g,
                 self.optim_g,
             )
-            _, _, _, self.epoch_str = utils.load_checkpoint(
-                utils.latest_checkpoint_path(self.hps.model_dir, "D_*.pth"),
+            _, _, _, self.epoch_str = load_checkpoint(
+                latest_checkpoint_path(self.hps.model_dir, "D_*.pth"),
                 self.net_d,
                 self.optim_d,
             )
             self.global_step = (self.epoch_str - 1) * len(self.train_loader)
         except Exception:
             print("Training from scratch")
-            epoch_str = 1
+            self.epoch_str = 1
             self.global_step = 0
 
         # Schedulers
         self.scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
-            self.optim_g, gamma=self.hps.train.lr_decay, last_epoch=epoch_str - 2
+            self.optim_g, gamma=self.hps.train.lr_decay, last_epoch=self.epoch_str - 2
         )
         self.scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
-            self.optim_d, gamma=self.hps.train.lr_decay, last_epoch=epoch_str - 2
+            self.optim_d, gamma=self.hps.train.lr_decay, last_epoch=self.epoch_str - 2
         )
 
         # Scaler ?
@@ -173,7 +181,7 @@ class Trainer:
                     self.hps.data.mel_fmin,
                     self.hps.data.mel_fmax,
                 )
-                y_mel = commons.slice_segments(
+                y_mel = slice_segments(
                     mel,
                     ids_slice,
                     self.hps.train.segment_size // self.hps.data.hop_length,
@@ -190,7 +198,7 @@ class Trainer:
                 )
                 tmp = max(tmp, y.size()[2])
                 tmp1 = min(tmp1, y.size()[2])
-                y = commons.slice_segments(
+                y = slice_segments(
                     y, ids_slice * self.hps.data.hop_length, self.hps.train.segment_size
                 )  # slice
 
@@ -203,7 +211,7 @@ class Trainer:
             self.optim_d.zero_grad()
             self.scaler.scale(loss_disc_all).backward()
             self.scaler.unscale_(self.optim_d)
-            grad_norm_d = commons.clip_grad_value_(self.net_d.parameters(), None)
+            grad_norm_d = clip_grad_value_(self.net_d.parameters(), None)
             self.scaler.step(self.optim_d)
 
             with autocast(enabled=self.hps.train.fp16_run):
@@ -233,7 +241,7 @@ class Trainer:
             self.optim_g.zero_grad()
             self.scaler.scale(loss_gen_all).backward()
             self.scaler.unscale_(self.optim_g)
-            grad_norm_g = commons.clip_grad_value_(self.net_g.parameters(), None)
+            grad_norm_g = clip_grad_value_(self.net_g.parameters(), None)
             self.scaler.step(self.optim_g)
             self.scaler.update()
 
@@ -288,7 +296,7 @@ class Trainer:
                             for i, v in enumerate(losses_disc_g)
                         }
                     )
-                    utils.summarize(
+                    summarize(
                         writer=self.writer,
                         global_step=self.global_step,
                         scalars=scalar_dict,
@@ -297,14 +305,14 @@ class Trainer:
                 if self.global_step % self.hps.train.eval_interval == 0:
                     self.evaluate()
 
-                    utils.save_checkpoint(
+                    save_checkpoint(
                         self.net_g,
                         self.optim_g,
                         self.hps.train.learning_rate,
                         epoch,
                         os.path.join(self.hps.model_dir, f"G_{self.global_step}.pth"),
                     )
-                    utils.save_checkpoint(
+                    save_checkpoint(
                         self.net_d,
                         self.optim_d,
                         self.hps.train.learning_rate,
@@ -374,7 +382,7 @@ class Trainer:
         )
         # torchaudio.save("tem_result_gt32768_{}.wav".format(global_step),y_gt[0, :, :].cpu(),16000)
 
-        utils.summarize(
+        summarize(
             writer=self.writer_eval,
             global_step=self.global_step,
             audios=audio_dict,

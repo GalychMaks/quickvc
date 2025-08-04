@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import torch
+from omegaconf import OmegaConf
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
@@ -27,7 +28,6 @@ from quickvc.utils.commons import clip_grad_value_, slice_segments
 from quickvc.utils.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
 from quickvc.utils.utils import (
     check_git_hash,
-    get_hparams,
     get_logger,
     latest_checkpoint_path,
     load_checkpoint,
@@ -42,23 +42,26 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class Trainer:
-    def __init__(self):
-        self.hps = get_hparams()
+    def __init__(self, config_path: Path | str):
+        self.config = OmegaConf.load(config_path)
+        self.config.model_dir = "logs/quickvc"
         self.global_step = 0
-        self.logger = get_logger(self.hps.model_dir)
-        self.logger.info(self.hps)
+        self.logger = get_logger(self.config.model_dir)
+        self.logger.info(self.config)
 
-        check_git_hash(self.hps.model_dir)
-        self.writer = SummaryWriter(log_dir=self.hps.model_dir)
+        check_git_hash(self.config.model_dir)
+        self.writer = SummaryWriter(log_dir=self.config.model_dir)
         self.writer_eval = SummaryWriter(
-            log_dir=os.path.join(self.hps.model_dir, "eval")
+            log_dir=os.path.join(self.config.model_dir, "eval")
         )
 
-        torch.manual_seed(self.hps.train.seed)
+        torch.manual_seed(self.config.train.seed)
 
         # Dataloaders
-        collate_fn = TextAudioSpeakerCollate(self.hps)
-        train_dataset = TextAudioSpeakerLoader(self.hps.data.training_files, self.hps)
+        collate_fn = TextAudioSpeakerCollate(self.config)
+        train_dataset = TextAudioSpeakerLoader(
+            self.config.data.training_files, self.config
+        )
         self.train_loader = DataLoader(
             train_dataset,
             num_workers=8,
@@ -67,7 +70,9 @@ class Trainer:
             collate_fn=collate_fn,
         )
 
-        eval_dataset = TextAudioSpeakerLoader(self.hps.data.validation_files, self.hps)
+        eval_dataset = TextAudioSpeakerLoader(
+            self.config.data.validation_files, self.config
+        )
         self.eval_loader = DataLoader(
             eval_dataset,
             num_workers=8,
@@ -79,38 +84,38 @@ class Trainer:
 
         # Networks
         self.net_g = SynthesizerTrn(
-            self.hps.data.filter_length // 2 + 1,
-            self.hps.train.segment_size // self.hps.data.hop_length,
-            **self.hps.model,
+            self.config.data.filter_length // 2 + 1,
+            self.config.train.segment_size // self.config.data.hop_length,
+            **self.config.model,
         ).to(device)
 
-        self.net_d = MultiPeriodDiscriminator(self.hps.model.use_spectral_norm).to(
+        self.net_d = MultiPeriodDiscriminator(self.config.model.use_spectral_norm).to(
             device
         )
 
         # Optimizers
         self.optim_g = torch.optim.AdamW(
             self.net_g.parameters(),
-            self.hps.train.learning_rate,
-            betas=self.hps.train.betas,
-            eps=self.hps.train.eps,
+            self.config.train.learning_rate,
+            betas=self.config.train.betas,
+            eps=self.config.train.eps,
         )
         self.optim_d = torch.optim.AdamW(
             self.net_d.parameters(),
-            self.hps.train.learning_rate,
-            betas=self.hps.train.betas,
-            eps=self.hps.train.eps,
+            self.config.train.learning_rate,
+            betas=self.config.train.betas,
+            eps=self.config.train.eps,
         )
 
         # Load checkpoints
         try:
             _, _, _, self.epoch_str = load_checkpoint(
-                latest_checkpoint_path(self.hps.model_dir, "G_*.pth"),
+                latest_checkpoint_path(self.config.model_dir, "G_*.pth"),
                 self.net_g,
                 self.optim_g,
             )
             _, _, _, self.epoch_str = load_checkpoint(
-                latest_checkpoint_path(self.hps.model_dir, "D_*.pth"),
+                latest_checkpoint_path(self.config.model_dir, "D_*.pth"),
                 self.net_d,
                 self.optim_d,
             )
@@ -122,18 +127,22 @@ class Trainer:
 
         # Schedulers
         self.scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
-            self.optim_g, gamma=self.hps.train.lr_decay, last_epoch=self.epoch_str - 2
+            self.optim_g,
+            gamma=self.config.train.lr_decay,
+            last_epoch=self.epoch_str - 2,
         )
         self.scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
-            self.optim_d, gamma=self.hps.train.lr_decay, last_epoch=self.epoch_str - 2
+            self.optim_d,
+            gamma=self.config.train.lr_decay,
+            last_epoch=self.epoch_str - 2,
         )
 
         # Scaler ?
-        self.scaler = GradScaler(enabled=self.hps.train.fp16_run)
+        self.scaler = GradScaler(enabled=self.config.train.fp16_run)
 
     def train(self):
         # Training loop
-        for epoch in range(self.epoch_str, self.hps.train.epochs + 1):
+        for epoch in range(self.epoch_str, self.config.train.epochs + 1):
             self.train_and_evaluate(epoch)
 
             self.scheduler_g.step()
@@ -156,14 +165,14 @@ class Trainer:
             c = c.to(device)
             mel = spec_to_mel_torch(
                 spec,
-                self.hps.data.filter_length,
-                self.hps.data.n_mel_channels,
-                self.hps.data.sampling_rate,
-                self.hps.data.mel_fmin,
-                self.hps.data.mel_fmax,
+                self.config.data.filter_length,
+                self.config.data.n_mel_channels,
+                self.config.data.sampling_rate,
+                self.config.data.mel_fmin,
+                self.config.data.mel_fmax,
             )
 
-            with autocast(enabled=self.hps.train.fp16_run):
+            with autocast(enabled=self.config.train.fp16_run):
                 # print(c.size())
                 (
                     y_hat,
@@ -175,31 +184,33 @@ class Trainer:
 
                 mel = spec_to_mel_torch(
                     spec,
-                    self.hps.data.filter_length,
-                    self.hps.data.n_mel_channels,
-                    self.hps.data.sampling_rate,
-                    self.hps.data.mel_fmin,
-                    self.hps.data.mel_fmax,
+                    self.config.data.filter_length,
+                    self.config.data.n_mel_channels,
+                    self.config.data.sampling_rate,
+                    self.config.data.mel_fmin,
+                    self.config.data.mel_fmax,
                 )
                 y_mel = slice_segments(
                     mel,
                     ids_slice,
-                    self.hps.train.segment_size // self.hps.data.hop_length,
+                    self.config.train.segment_size // self.config.data.hop_length,
                 )
                 y_hat_mel = mel_spectrogram_torch(
                     y_hat.squeeze(1),
-                    self.hps.data.filter_length,
-                    self.hps.data.n_mel_channels,
-                    self.hps.data.sampling_rate,
-                    self.hps.data.hop_length,
-                    self.hps.data.win_length,
-                    self.hps.data.mel_fmin,
-                    self.hps.data.mel_fmax,
+                    self.config.data.filter_length,
+                    self.config.data.n_mel_channels,
+                    self.config.data.sampling_rate,
+                    self.config.data.hop_length,
+                    self.config.data.win_length,
+                    self.config.data.mel_fmin,
+                    self.config.data.mel_fmax,
                 )
                 tmp = max(tmp, y.size()[2])
                 tmp1 = min(tmp1, y.size()[2])
                 y = slice_segments(
-                    y, ids_slice * self.hps.data.hop_length, self.hps.train.segment_size
+                    y,
+                    ids_slice * self.config.data.hop_length,
+                    self.config.train.segment_size,
                 )  # slice
 
                 y_d_hat_r, y_d_hat_g, _, _ = self.net_d(y, y_hat.detach())
@@ -214,23 +225,24 @@ class Trainer:
             grad_norm_d = clip_grad_value_(self.net_d.parameters(), None)
             self.scaler.step(self.optim_d)
 
-            with autocast(enabled=self.hps.train.fp16_run):
+            with autocast(enabled=self.config.train.fp16_run):
                 # Generator
                 y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = self.net_d(y, y_hat)
                 with autocast(enabled=False):
                     # loss_dur = torch.sum(l_length.float())
-                    loss_mel = F.l1_loss(y_mel, y_hat_mel) * self.hps.train.c_mel
+                    loss_mel = F.l1_loss(y_mel, y_hat_mel) * self.config.train.c_mel
                     loss_kl = (
-                        kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * self.hps.train.c_kl
+                        kl_loss(z_p, logs_q, m_p, logs_p, z_mask)
+                        * self.config.train.c_kl
                     )
 
                     loss_fm = feature_loss(fmap_r, fmap_g)
                     loss_gen, losses_gen = generator_loss(y_d_hat_g)
 
-                    if self.hps.model.mb_istft_vits:
+                    if self.config.model.mb_istft_vits:
                         pqmf = PQMF(y.device)
                         y_mb = pqmf.analysis(y)
-                        loss_subband = subband_stft_loss(self.hps, y_mb, y_hat_mb)
+                        loss_subband = subband_stft_loss(self.config, y_mb, y_hat_mb)
                     else:
                         loss_subband = torch.tensor(0.0)
 
@@ -246,7 +258,7 @@ class Trainer:
             self.scaler.update()
 
             if True:
-                if self.global_step % self.hps.train.log_interval == 0:
+                if self.global_step % self.config.train.log_interval == 0:
                     lr = self.optim_g.param_groups[0]["lr"]
                     losses = [
                         loss_disc,
@@ -302,22 +314,26 @@ class Trainer:
                         scalars=scalar_dict,
                     )
 
-                if self.global_step % self.hps.train.eval_interval == 0:
+                if self.global_step % self.config.train.eval_interval == 0:
                     self.evaluate()
 
                     save_checkpoint(
                         self.net_g,
                         self.optim_g,
-                        self.hps.train.learning_rate,
+                        self.config.train.learning_rate,
                         epoch,
-                        os.path.join(self.hps.model_dir, f"G_{self.global_step}.pth"),
+                        os.path.join(
+                            self.config.model_dir, f"G_{self.global_step}.pth"
+                        ),
                     )
                     save_checkpoint(
                         self.net_d,
                         self.optim_d,
-                        self.hps.train.learning_rate,
+                        self.config.train.learning_rate,
                         epoch,
-                        os.path.join(self.hps.model_dir, f"D_{self.global_step}.pth"),
+                        os.path.join(
+                            self.config.model_dir, f"D_{self.global_step}.pth"
+                        ),
                     )
             self.global_step += 1
 
@@ -335,22 +351,22 @@ class Trainer:
                 break
             mel = spec_to_mel_torch(
                 spec,
-                self.hps.data.filter_length,
-                self.hps.data.n_mel_channels,
-                self.hps.data.sampling_rate,
-                self.hps.data.mel_fmin,
-                self.hps.data.mel_fmax,
+                self.config.data.filter_length,
+                self.config.data.n_mel_channels,
+                self.config.data.sampling_rate,
+                self.config.data.mel_fmin,
+                self.config.data.mel_fmax,
             )
             # y_hat, y_hat_mb, attn, mask, *_ = generator.module.infer(x, x_lengths, max_len=1000)
             # y_hat_lengths = mask.sum([1,2]).long() * self.hps.data.hop_length
             y_hat = self.net_g.infer(c, g=g, mel=mel)
             mel = spec_to_mel_torch(
                 spec,
-                self.hps.data.filter_length,
-                self.hps.data.n_mel_channels,
-                self.hps.data.sampling_rate,
-                self.hps.data.mel_fmin,
-                self.hps.data.mel_fmax,
+                self.config.data.filter_length,
+                self.config.data.n_mel_channels,
+                self.config.data.sampling_rate,
+                self.config.data.mel_fmin,
+                self.config.data.mel_fmax,
             )
             # y_hat_mel = mel_spectrogram_torch(
             #     y_hat.squeeze(1).float(),
@@ -386,11 +402,6 @@ class Trainer:
             writer=self.writer_eval,
             global_step=self.global_step,
             audios=audio_dict,
-            audio_sampling_rate=self.hps.data.sampling_rate,
+            audio_sampling_rate=self.config.data.sampling_rate,
         )
         self.net_g.train()
-
-
-if __name__ == "__main__":
-    trainer = Trainer()
-    trainer.train()

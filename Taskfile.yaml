@@ -61,4 +61,4 @@ tasks:
     desc: Start QuickVC traning
     cmds:
       - >
-        python -m quickvc.training.train
+        python -m quickvc.cli.main train

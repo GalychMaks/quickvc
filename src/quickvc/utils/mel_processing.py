@@ -49,7 +49,6 @@ def spectrogram_torch(y, n_fft, sampling_rate, hop_size, win_size, center=False)
         hann_window[wnsize_dtype_device] = torch.hann_window(win_size).to(
             dtype=y.dtype, device=y.device
         )
-
     y = torch.nn.functional.pad(
         y.unsqueeze(1),
         (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)),
@@ -67,6 +66,7 @@ def spectrogram_torch(y, n_fft, sampling_rate, hop_size, win_size, center=False)
         pad_mode="reflect",
         normalized=False,
         onesided=True,
+        return_complex=False,
     )
 
     spec = torch.sqrt(spec.pow(2).sum(-1) + 1e-6)

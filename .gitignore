@@ -56,3 +56,5 @@ dist/
 checkpoints/
 data/
 output/
+temp_result/
+logs/

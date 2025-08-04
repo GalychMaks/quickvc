@@ -14,7 +14,8 @@ dependencies = [
     "tqdm",
     "pydub",
     "typer",
-    "omegaconf"
+    "omegaconf",
+    "tensorboard"
 ]
 
 [project.optional-dependencies]

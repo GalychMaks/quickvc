@@ -1,18 +1,9 @@
 import os
+from pathlib import Path
 
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
-from losses import (
-    discriminator_loss,
-    feature_loss,
-    generator_loss,
-    kl_loss,
-    subband_stft_loss,
-)
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn import functional as F
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -24,88 +15,43 @@ from quickvc.modules.models import (
 )
 from quickvc.modules.pqmf import PQMF
 from quickvc.training.data_utils_new_new import (
-    DistributedBucketSampler,
     TextAudioSpeakerCollate,
     TextAudioSpeakerLoader,
 )
+from quickvc.training.losses import (
+    discriminator_loss,
+    feature_loss,
+    generator_loss,
+    kl_loss,
+    subband_stft_loss,
+)
 from quickvc.utils.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
-
-# from text.symbols import symbols
 
 torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.benchmark = True
 global_step = 0
+global_step = 0
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main():
-    """Assume Single Node Multi GPUs Training Only"""
-    assert torch.cuda.is_available(), "CPU training is not allowed."
-
-    n_gpus = torch.cuda.device_count()
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "65520"
-    #   n_gpus = 1
-
     hps = utils.get_hparams()
-    mp.spawn(
-        run,
-        nprocs=n_gpus,
-        args=(
-            n_gpus,
-            hps,
-        ),
-    )
+    run(0, 1, hps)
 
 
 def run(rank, n_gpus, hps):
     global global_step
-    if rank == 0:
-        logger = utils.get_logger(hps.model_dir)
-        logger.info(hps)
-        utils.check_git_hash(hps.model_dir)
-        writer = SummaryWriter(log_dir=hps.model_dir)
-        writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
+    logger = utils.get_logger(hps.model_dir)
+    logger.info(hps)
+    utils.check_git_hash(hps.model_dir)
+    writer = SummaryWriter(log_dir=hps.model_dir)
+    writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
 
-    dist.init_process_group(
-        backend="nccl", init_method="env://", world_size=n_gpus, rank=rank
-    )
     torch.manual_seed(hps.train.seed)
-    torch.cuda.set_device(rank)
 
     train_dataset = TextAudioSpeakerLoader(hps.data.training_files, hps)
-    train_sampler = DistributedBucketSampler(
-        train_dataset,
-        hps.train.batch_size,
-        [
-            32,
-            40,
-            50,
-            60,
-            70,
-            80,
-            90,
-            100,
-            110,
-            120,
-            160,
-            200,
-            230,
-            260,
-            300,
-            350,
-            400,
-            450,
-            500,
-            600,
-            700,
-            800,
-            900,
-            1000,
-        ],
-        num_replicas=n_gpus,
-        rank=rank,
-        shuffle=True,
-    )
+
     collate_fn = TextAudioSpeakerCollate(hps)
     train_loader = DataLoader(
         train_dataset,
@@ -113,25 +59,23 @@ def run(rank, n_gpus, hps):
         shuffle=False,
         pin_memory=True,
         collate_fn=collate_fn,
-        batch_sampler=train_sampler,
     )
-    if rank == 0:
-        eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps)
-        eval_loader = DataLoader(
-            eval_dataset,
-            num_workers=8,
-            shuffle=True,
-            batch_size=1,
-            pin_memory=False,
-            drop_last=False,
-        )
+    eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps)
+    eval_loader = DataLoader(
+        eval_dataset,
+        num_workers=8,
+        shuffle=True,
+        batch_size=1,
+        pin_memory=False,
+        drop_last=False,
+    )
 
     net_g = SynthesizerTrn(
         hps.data.filter_length // 2 + 1,
         hps.train.segment_size // hps.data.hop_length,
         **hps.model,
-    ).cuda(rank)
-    net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
+    ).to(device)
+    net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).to(device)
     optim_g = torch.optim.AdamW(
         net_g.parameters(),
         hps.train.learning_rate,
@@ -144,8 +88,6 @@ def run(rank, n_gpus, hps):
         betas=hps.train.betas,
         eps=hps.train.eps,
     )
-    net_g = DDP(net_g, device_ids=[rank])
-    net_d = DDP(net_d, device_ids=[rank])
 
     try:
         _, _, _, epoch_str = utils.load_checkpoint(
@@ -169,32 +111,18 @@ def run(rank, n_gpus, hps):
     scaler = GradScaler(enabled=hps.train.fp16_run)
 
     for epoch in range(epoch_str, hps.train.epochs + 1):
-        if rank == 0:
-            train_and_evaluate(
-                rank,
-                epoch,
-                hps,
-                [net_g, net_d],
-                [optim_g, optim_d],
-                [scheduler_g, scheduler_d],
-                scaler,
-                [train_loader, eval_loader],
-                logger,
-                [writer, writer_eval],
-            )
-        else:
-            train_and_evaluate(
-                rank,
-                epoch,
-                hps,
-                [net_g, net_d],
-                [optim_g, optim_d],
-                [scheduler_g, scheduler_d],
-                scaler,
-                [train_loader, None],
-                None,
-                None,
-            )
+        train_and_evaluate(
+            rank,
+            epoch,
+            hps,
+            [net_g, net_d],
+            [optim_g, optim_d],
+            [scheduler_g, scheduler_d],
+            scaler,
+            [train_loader, eval_loader],
+            logger,
+            [writer, writer_eval],
+        )
         scheduler_g.step()
         scheduler_d.step()
 
@@ -217,9 +145,9 @@ def train_and_evaluate(
     net_d.train()
     for batch_idx, (c, spec, y) in enumerate(train_loader):
         g = None
-        spec, y = spec.cuda(rank, non_blocking=True), y.cuda(rank, non_blocking=True)
+        spec, y = spec.to(device), y.to(device)
 
-        c = c.cuda(rank, non_blocking=True)
+        c = c.to(device)
         mel = spec_to_mel_torch(
             spec,
             hps.data.filter_length,
@@ -339,22 +267,9 @@ def train_and_evaluate(
                 scalar_dict.update(
                     {"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)}
                 )
-                image_dict = {
-                    "slice/mel_org": utils.plot_spectrogram_to_numpy(
-                        y_mel[0].data.cpu().numpy()
-                    ),
-                    "slice/mel_gen": utils.plot_spectrogram_to_numpy(
-                        y_hat_mel[0].data.cpu().numpy()
-                    ),
-                    "all/mel": utils.plot_spectrogram_to_numpy(
-                        mel[0].data.cpu().numpy()
-                    ),
-                    # "all/attn": utils.plot_alignment_to_numpy(attn[0,0].data.cpu().numpy())
-                }
                 utils.summarize(
                     writer=writer,
                     global_step=global_step,
-                    images=image_dict,
                     scalars=scalar_dict,
                 )
 
@@ -386,8 +301,8 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     with torch.no_grad():
         for batch_idx, (c, spec, y) in enumerate(eval_loader):
             g = None
-            spec, y = spec[:1].cuda(0), y[:1].cuda(0)
-            c = c[:1].cuda(0)
+            spec, y = spec[:1].to(device), y[:1].to(device)
+            c = c[:1].to(device)
 
             break
         mel = spec_to_mel_torch(
@@ -400,7 +315,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
         )
         # y_hat, y_hat_mb, attn, mask, *_ = generator.module.infer(x, x_lengths, max_len=1000)
         # y_hat_lengths = mask.sum([1,2]).long() * hps.data.hop_length
-        y_hat = generator.module.infer(c, g=g, mel=mel)
+        y_hat = generator.infer(c, g=g, mel=mel)
         mel = spec_to_mel_torch(
             spec,
             hps.data.filter_length,
@@ -409,26 +324,24 @@ def evaluate(hps, generator, eval_loader, writer_eval):
             hps.data.mel_fmin,
             hps.data.mel_fmax,
         )
-        y_hat_mel = mel_spectrogram_torch(
-            y_hat.squeeze(1).float(),
-            hps.data.filter_length,
-            hps.data.n_mel_channels,
-            hps.data.sampling_rate,
-            hps.data.hop_length,
-            hps.data.win_length,
-            hps.data.mel_fmin,
-            hps.data.mel_fmax,
-        )
-    image_dict = {
-        "gen/mel": utils.plot_spectrogram_to_numpy(y_hat_mel[0].cpu().numpy()),
-        "gt/mel": utils.plot_spectrogram_to_numpy(mel[0].cpu().numpy()),
-    }
+        # y_hat_mel = mel_spectrogram_torch(
+        #     y_hat.squeeze(1).float(),
+        #     hps.data.filter_length,
+        #     hps.data.n_mel_channels,
+        #     hps.data.sampling_rate,
+        #     hps.data.hop_length,
+        #     hps.data.win_length,
+        #     hps.data.mel_fmin,
+        #     hps.data.mel_fmax,
+        # )
+
     audio_dict = {"gen/audio": y_hat[0], "gt/audio": y[0]}
 
     import torchaudio
 
     y_gt = y * 32768  # noqa: F841
     print(y_hat.size())
+    Path("temp_result").mkdir()
     torchaudio.save(
         "temp_result/vctkms_new_tem_result_{}.wav".format(global_step),
         y_hat[0, :, :].cpu(),
@@ -444,7 +357,6 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     utils.summarize(
         writer=writer_eval,
         global_step=global_step,
-        images=image_dict,
         audios=audio_dict,
         audio_sampling_rate=hps.data.sampling_rate,
     )

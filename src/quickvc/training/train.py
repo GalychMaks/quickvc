@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -27,8 +28,6 @@ from quickvc.training.losses import (
 from quickvc.utils.commons import clip_grad_value_, slice_segments
 from quickvc.utils.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
 from quickvc.utils.utils import (
-    check_git_hash,
-    get_logger,
     latest_checkpoint_path,
     load_checkpoint,
     save_checkpoint,
@@ -40,16 +39,16 @@ torch.backends.cudnn.benchmark = True
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+logger = logging.getLogger(__name__)
+
 
 class Trainer:
     def __init__(self, config_path: Path | str):
         self.config = OmegaConf.load(config_path)
         self.config.model_dir = "logs/quickvc"
         self.global_step = 0
-        self.logger = get_logger(self.config.model_dir)
-        self.logger.info(self.config)
+        logger.info(self.config)
 
-        check_git_hash(self.config.model_dir)
         self.writer = SummaryWriter(log_dir=self.config.model_dir)
         self.writer_eval = SummaryWriter(
             log_dir=os.path.join(self.config.model_dir, "eval")
@@ -268,14 +267,12 @@ class Trainer:
                         loss_kl,
                         loss_subband,
                     ]
-                    self.logger.info(
+                    logger.info(
                         "Train Epoch: {} [{:.0f}%]".format(
                             epoch, 100.0 * batch_idx / len(self.train_loader)
                         )
                     )
-                    self.logger.info(
-                        [x.item() for x in losses] + [self.global_step, lr]
-                    )
+                    logger.info([x.item() for x in losses] + [self.global_step, lr])
 
                     scalar_dict = {
                         "loss/g/total": loss_gen_all,
@@ -337,7 +334,7 @@ class Trainer:
                     )
             self.global_step += 1
 
-        self.logger.info(f"====> Epoch: {epoch}")
+        logger.info(f"====> Epoch: {epoch}")
         print(tmp, tmp1)
 
     def evaluate(self):

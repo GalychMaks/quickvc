@@ -154,7 +154,6 @@ class Trainer:
         self.net_g.train()
         self.net_d.train()
         for batch_idx, (c, spec, y) in enumerate(self.train_loader):
-            g = None
             spec, y = spec.to(self.device), y.to(self.device)
 
             c = c.to(self.device)
@@ -167,14 +166,13 @@ class Trainer:
                 self.config.data.mel_fmax,
             )
 
-            # print(c.size())
             (
                 y_hat,
                 y_hat_mb,
                 ids_slice,
                 z_mask,
                 (z, z_p, m_p, logs_p, m_q, logs_q),
-            ) = self.net_g(c, spec, g=g, mel=mel)
+            ) = self.net_g(c, spec, g=None, mel=mel)
 
             mel = spec_to_mel_torch(
                 spec,
@@ -244,144 +242,102 @@ class Trainer:
             grad_norm_g = clip_grad_value_(self.net_g.parameters(), None)
             self.optim_g.step()
 
-            if True:
-                if self.global_step % self.config.train.log_interval == 0:
-                    lr = self.optim_g.param_groups[0]["lr"]
-                    losses = [
-                        loss_disc,
-                        loss_gen,
-                        loss_fm,
-                        loss_mel,
-                        loss_kl,
-                        loss_subband,
-                    ]
-                    logger.info(
-                        "Train Epoch: {} [{:.0f}%]".format(
-                            epoch, 100.0 * batch_idx / len(self.train_loader)
-                        )
-                    )
-                    logger.info([x.item() for x in losses] + [self.global_step, lr])
+            if self.global_step % self.config.train.log_interval == 0:
+                lr = self.optim_g.param_groups[0]["lr"]
+                losses = [
+                    loss_disc,
+                    loss_gen,
+                    loss_fm,
+                    loss_mel,
+                    loss_kl,
+                    loss_subband,
+                ]
+                logger.info(
+                    f"Train Epoch: {epoch} [{100.0 * batch_idx / len(self.train_loader):.0f}%]"
+                )
+                logger.info([x.item() for x in losses] + [self.global_step, lr])
 
-                    scalar_dict = {
-                        "loss/g/total": loss_gen_all,
-                        "loss/d/total": loss_disc_all,
-                        "learning_rate": lr,
-                        "grad_norm_d": grad_norm_d,
-                        "grad_norm_g": grad_norm_g,
+                scalar_dict = {
+                    "loss/g/total": loss_gen_all,
+                    "loss/d/total": loss_disc_all,
+                    "learning_rate": lr,
+                    "grad_norm_d": grad_norm_d,
+                    "grad_norm_g": grad_norm_g,
+                }
+                scalar_dict.update(
+                    {
+                        "loss/g/fm": loss_fm,
+                        "loss/g/mel": loss_mel,
+                        "loss/g/kl": loss_kl,
+                        "loss/g/subband": loss_subband,
                     }
-                    scalar_dict.update(
-                        {
-                            "loss/g/fm": loss_fm,
-                            "loss/g/mel": loss_mel,
-                            "loss/g/kl": loss_kl,
-                            "loss/g/subband": loss_subband,
-                        }
-                    )
+                )
 
-                    scalar_dict.update(
-                        {"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)}
-                    )
-                    scalar_dict.update(
-                        {
-                            "loss/d_r/{}".format(i): v
-                            for i, v in enumerate(losses_disc_r)
-                        }
-                    )
-                    scalar_dict.update(
-                        {
-                            "loss/d_g/{}".format(i): v
-                            for i, v in enumerate(losses_disc_g)
-                        }
-                    )
-                    summarize(
-                        writer=self.writer,
-                        global_step=self.global_step,
-                        scalars=scalar_dict,
-                    )
+                scalar_dict.update({f"loss/g/{i}": v for i, v in enumerate(losses_gen)})
+                scalar_dict.update(
+                    {f"loss/d_r/{i}": v for i, v in enumerate(losses_disc_r)}
+                )
+                scalar_dict.update(
+                    {f"loss/d_g/{i}": v for i, v in enumerate(losses_disc_g)}
+                )
 
-                if self.global_step % self.config.train.eval_interval == 0:
-                    self.evaluate()
+                summarize(
+                    writer=self.writer,
+                    global_step=self.global_step,
+                    scalars=scalar_dict,
+                )
 
-                    save_checkpoint(
-                        self.net_g,
-                        self.optim_g,
-                        self.config.train.learning_rate,
-                        epoch,
-                        os.path.join(
-                            self.config.model_dir, f"G_{self.global_step}.pth"
-                        ),
-                    )
-                    save_checkpoint(
-                        self.net_d,
-                        self.optim_d,
-                        self.config.train.learning_rate,
-                        epoch,
-                        os.path.join(
-                            self.config.model_dir, f"D_{self.global_step}.pth"
-                        ),
-                    )
+            if self.global_step % self.config.train.eval_interval == 0:
+                self.evaluate()
+
+                save_checkpoint(
+                    self.net_g,
+                    self.optim_g,
+                    self.config.train.learning_rate,
+                    epoch,
+                    os.path.join(self.config.model_dir, f"G_{self.global_step}.pth"),
+                )
+                save_checkpoint(
+                    self.net_d,
+                    self.optim_d,
+                    self.config.train.learning_rate,
+                    epoch,
+                    os.path.join(self.config.model_dir, f"D_{self.global_step}.pth"),
+                )
+
             self.global_step += 1
 
         logger.info(f"====> Epoch: {epoch}")
         print(tmp, tmp1)
 
+    @torch.no_grad()
     def evaluate(self):
         self.net_g.eval()
-        with torch.no_grad():
-            for batch_idx, (c, spec, y) in enumerate(self.eval_loader):
-                g = None
-                spec, y = spec[:1].to(self.device), y[:1].to(self.device)
-                c = c[:1].to(self.device)
 
-                break
-            mel = spec_to_mel_torch(
-                spec,
-                self.config.data.filter_length,
-                self.config.data.n_mel_channels,
-                self.config.data.sampling_rate,
-                self.config.data.mel_fmin,
-                self.config.data.mel_fmax,
-            )
-            # y_hat, y_hat_mb, attn, mask, *_ = generator.module.infer(x, x_lengths, max_len=1000)
-            # y_hat_lengths = mask.sum([1,2]).long() * self.hps.data.hop_length
-            y_hat = self.net_g.infer(c, g=g, mel=mel)
-            mel = spec_to_mel_torch(
-                spec,
-                self.config.data.filter_length,
-                self.config.data.n_mel_channels,
-                self.config.data.sampling_rate,
-                self.config.data.mel_fmin,
-                self.config.data.mel_fmax,
-            )
-            # y_hat_mel = mel_spectrogram_torch(
-            #     y_hat.squeeze(1).float(),
-            #     self.hps.data.filter_length,
-            #     self.hps.data.n_mel_channels,
-            #     self.hps.data.sampling_rate,
-            #     self.hps.data.hop_length,
-            #     self.hps.data.win_length,
-            #     self.hps.data.mel_fmin,
-            #     self.hps.data.mel_fmax,
-            # )
+        # Predefine variables to avoid "possibly unbound" warnings
+        c = spec = y = None
+
+        for batch_idx, (c_batch, spec_batch, y_batch) in enumerate(self.eval_loader):
+            spec = spec_batch[:1].to(self.device)
+            y = y_batch[:1].to(self.device)
+            c = c_batch[:1].to(self.device)
+            break
+
+        if spec is None or c is None or y is None:
+            logger.error("Couldn't load batch from eval_loader")
+            return
+
+        mel = spec_to_mel_torch(
+            spec,
+            self.config.data.filter_length,
+            self.config.data.n_mel_channels,
+            self.config.data.sampling_rate,
+            self.config.data.mel_fmin,
+            self.config.data.mel_fmax,
+        )
+        y_hat = self.net_g.infer(c, mel=mel)
 
         audio_dict = {"gen/audio": y_hat[0], "gt/audio": y[0]}
-
-        import torchaudio
-
-        y_gt = y * 32768  # noqa: F841
-        print(y_hat.size())
-        Path("temp_result").mkdir(exist_ok=True)
-        torchaudio.save(
-            "temp_result/vctkms_new_tem_result_{}.wav".format(self.global_step),
-            y_hat[0, :, :].cpu(),
-            16000,
-        )
-        torchaudio.save(
-            "temp_result/vctkms_new_tem_result_gt_{}.wav".format(self.global_step),
-            y[0, :, :].cpu(),
-            16000,
-        )
-        # torchaudio.save("tem_result_gt32768_{}.wav".format(global_step),y_gt[0, :, :].cpu(),16000)
 
         summarize(
             writer=self.writer_eval,
@@ -389,4 +345,3 @@ class Trainer:
             audios=audio_dict,
             audio_sampling_rate=self.config.data.sampling_rate,
         )
-        self.net_g.train()

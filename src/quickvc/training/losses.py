@@ -1,3 +1,4 @@
+from typing import List, Sequence, Tuple
 import torch
 
 from quickvc.training.stft_loss import MultiResolutionSTFTLoss
@@ -14,10 +15,16 @@ def feature_loss(fmap_r, fmap_g):
     return loss * 2
 
 
-def discriminator_loss(disc_real_outputs, disc_generated_outputs):
-    loss = 0
-    r_losses = []
-    g_losses = []
+def discriminator_loss(
+    disc_real_outputs: Sequence[torch.Tensor],
+    disc_generated_outputs: Sequence[torch.Tensor],
+) -> Tuple[torch.Tensor, List[float], List[float]]:
+    device = disc_real_outputs[0].device
+    loss: torch.Tensor = torch.tensor(0.0, device=device)
+
+    r_losses: List[float] = []
+    g_losses: List[float] = []
+
     for dr, dg in zip(disc_real_outputs, disc_generated_outputs):
         dr = dr.float()
         dg = dg.float()
